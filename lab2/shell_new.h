@@ -65,6 +65,9 @@ std::string OmitSpace(std::string& s) {
     return ans;
 }
 
+std::string TrimOmit(std::string& s) {
+    return OmitSpace(Trim(s));
+}
 // classic implementation of <cpp string split>
 // additional feature: 
 //   1. Trim the given line.
@@ -74,12 +77,19 @@ std::vector<std::string> split(std::string s, const std::string &delimiter) {
     size_t pos = 0;
     std::string token;
     s = Trim(s);
-    if (delimiter == " ") s = OmitSpace(s);
+    s = OmitSpace(s);
     while ((pos = s.find(delimiter)) != std::string::npos) {
         token = s.substr(0, pos);
-        if (token.length()) res.push_back(token);
+        if (token.length()) {
+            token = Trim(token);
+            res.push_back(token);
+        }
         s = s.substr(pos + delimiter.length());
     }
-    if (s.length()) res.push_back(s);
+    if (s.length()) {
+        s = Trim(s);
+        res.push_back(s);
+    }
+
     return res;
 }
