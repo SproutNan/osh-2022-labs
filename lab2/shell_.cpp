@@ -18,8 +18,10 @@
 
 bool is_debug = false;
 
-constexpr auto history_file_path = "./.history";
-constexpr auto history_max = 1024;
+std::string path1 = "/home/";
+std::string path2 = "/.sprout_history";
+std::string path;
+const int history_max = 1024;
 
 class history {
 private:
@@ -38,10 +40,20 @@ public:
     // load history to vector
     bool load_history_insts() {
         // init the history file
-        auto history_file = fopen(history_file_path, "a+");
-        fclose(history_file);
+        char username[200];
+        int _ret = getlogin_r(username, 200);
+        if (_ret < 0) {
+            return false;
+        }
+        path = path1 + username + path2;
 
-        history_file = fopen(history_file_path, "r");
+        auto history_file_re = open(path.data(), O_CREAT | O_RDWR | O_TRUNC, 0664);
+        if (history_file_re < 0) {
+            printf("open '%s' error: %s\n", path.data(), strerror(errno));
+        }
+        close(history_file_re);
+
+        auto history_file = fopen(path.data(), "r");
         std::string history_file_contents;
         while (true) {
             char ch = fgetc(history_file);
@@ -62,7 +74,7 @@ public:
     // when destruct shell, save
     bool save_history_insts() {
         try {
-            auto history_file = fopen(history_file_path, "w+");
+            auto history_file = fopen(path.data(), "w+");
             int size = history_cmds.size();
             for (int i = 0; i < size; i++) {
                 fputs(history_cmds[i].data(), history_file);
@@ -94,8 +106,17 @@ public:
     void disp_history_inst(int n) {
         int size = history_cmds.size();
         for (int i = n - 1; i >= 0; i--) {
-            std::cout << size - i << "\t" << history_cmds[size - i] << '\n';
+            std::cout << size - i << "\t" << history_cmds[size - i - 1] << '\n';
         }
+    }
+    std::string get_history_by_number(int number = INT_MAX){
+        if (number == INT_MAX) {
+            return *history_cmds.rbegin();
+        }
+        else if (number <= history_cmds.size()) {
+            return history_cmds[number-1];
+        }
+        return std::string("");
     }
 };
 
@@ -207,6 +228,7 @@ int exec_builtin(int argc, char** argv, int* fd) {
     }
     else if (strcmp(argv[0], "exit") == 0) {
         if (argc <= 1) {
+            history_ptr->~history();
             exit(0);
             return 0;
         }
@@ -219,6 +241,7 @@ int exec_builtin(int argc, char** argv, int* fd) {
         catch (...) {
             std::cout << "invalid parameter.\n";
         }
+        history_ptr->~history();
         exit(code);
         return 0;
     }
@@ -243,7 +266,7 @@ int exec_builtin(int argc, char** argv, int* fd) {
                 history_ptr->disp_history_inst(_num);
             }
             catch (...) {
-                std::cout << "invalid parameter.\n"
+                std::cout << "invalid parameter.\n";
             }
         }
         return 0;
@@ -344,6 +367,7 @@ int execute(int argc, char** argv) {
     dup2(fd[WRITE_END], STDOUT_FILENO);
     /* TODO:运行命令与结束 */
     execvp(argv[0], argv);
+    return 0;
 }
 
 int main() {
@@ -364,7 +388,27 @@ int main() {
         fflush(stdout);
 
         fgets(cmdline, 256, stdin);
+
+        std::string backup_command = cmdline;
+        backup_command = backup_command.substr(0, backup_command.length() - 1);
+
         strtok(cmdline, "\n");
+
+        if (strcmp(cmdline, "!!") == 0) {
+            strcpy(cmdline, history_ptr->get_history_by_number().data());
+        }
+        else if (cmdline[0] == '!') {
+            int number = INT_MIN;
+            try {
+                number = atoi(split(backup_command.substr(1), " ")[0].data());
+            }
+            catch (...) {
+                number = INT_MIN;
+                std::cout << "invalid instruction.\n";
+                continue;
+            }
+            strcpy(cmdline, history_ptr->get_history_by_number(number).data());
+        }
 
         /* TODO: 基于";"的多命令执行，请自行选择位置添加 */
         count = split_string(cmdline, ";", complete_commands);
@@ -456,6 +500,7 @@ int main() {
 
             }
         }
+        history_ptr->add_history_inst(backup_command);
     }
 }
 
