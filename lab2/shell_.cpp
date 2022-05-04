@@ -47,7 +47,7 @@ public:
         }
         path = path1 + username + path2;
 
-        auto history_file_re = open(path.data(), O_CREAT | O_RDWR | O_TRUNC, 0664);
+        auto history_file_re = open(path.data(), O_CREAT | O_APPEND, 0664);
         if (history_file_re < 0) {
             printf("open '%s' error: %s\n", path.data(), strerror(errno));
         }
