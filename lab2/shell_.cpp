@@ -312,9 +312,11 @@ int main() {
         char current_path[200];
         getcwd(current_path, 200);
 
-        printf("shell:%s -> ", current_path);
+        std::cout << "\033[32m" << current_path << "\033[33m" << " # \033[0m";
+
         fflush(stdout);
 
+    
         fgets(cmdline, 256, stdin);
         strtok(cmdline, "\n");
 
@@ -368,6 +370,13 @@ int main() {
                     }
                     int pid = fork();
                     if (pid == 0) {
+                        char* argv[MAX_CMD_ARG_NUM];
+                        int argc = split_string(commands[i], " ", argv);
+                        std::vector<std::string> argv_cpp;
+                        convert_chpp_svs(argv_cpp, argc, argv);
+                        for (auto& i : argv_cpp) {
+                            std::cout << i << ';';
+                        }
                         /* TODO:除了最后一条命令外，都将标准输出重定向到当前管道入口*/
                         if (i < cmd_count - 1) {
                             dup2(pipefd[1], STDOUT_FILENO);
@@ -379,10 +388,7 @@ int main() {
                         /* TODO:处理参数，分出命令名和参数，并使用execute运行
                          * 在使用管道时，为了可以并发运行，所以内建命令也在子进程中运行
                          * 因此我们用了一个封装好的execute函数*/
-                        char* argv[MAX_CMD_ARG_NUM];
-                        int argc = split_string(commands[i], " ", argv);
-                        std::vector<std::string> argv_cpp;
-                        convert_chpp_svs(argv_cpp, argc, argv);
+
                         execute(argv_cpp);
                         exit(255);
                     }
