@@ -16,12 +16,90 @@
 #define WRITE_END 1     // pipe write end
 #define READ_END 0      // pipe read end
 
-/*
- * 需要大家完成的代码已经用注释`TODO:`标记
- * 可以编辑器搜索找到
- * 使用支持TODO高亮编辑器（如vscode装TODO highlight插件）的同学可以轻松找到要添加内容的地方。
- */
+bool is_debug = false;
 
+constexpr auto history_file_path = "./.history";
+constexpr auto history_max = 1024;
+
+class history {
+private:
+    std::vector<std::string> history_cmds;
+public:
+    history() {
+        if (load_history_insts() && is_debug) {
+            std::cout << "Load history instructions success.\n";
+        }
+    }
+    ~history() {
+        if (save_history_insts() && is_debug) {
+            std::cout << "Save history instructions success.\n";
+        }
+    }
+    // load history to vector
+    bool load_history_insts() {
+        // init the history file
+        auto history_file = fopen(history_file_path, "a+");
+        fclose(history_file);
+
+        history_file = fopen(history_file_path, "r");
+        std::string history_file_contents;
+        while (true) {
+            char ch = fgetc(history_file);
+            if (ch == EOF) break;
+            history_file_contents += ch;
+        }
+        fclose(history_file);
+        // catch split errors
+        try {
+            history_cmds = split(history_file_contents, "\n");
+        }
+        catch (...) {
+            history_cmds.clear();
+            return false;
+        }
+        return true;
+    }
+    // when destruct shell, save
+    bool save_history_insts() {
+        try {
+            auto history_file = fopen(history_file_path, "w+");
+            int size = history_cmds.size();
+            for (int i = 0; i < size; i++) {
+                fputs(history_cmds[i].data(), history_file);
+                if (i != size - 1) fputc('\n', history_file);
+            }
+            fclose(history_file);
+            return true;
+        }
+        catch (...) {
+            return false;
+        }
+    }
+    // add one cmd to history
+    void add_history_inst(std::string s) {
+        if (history_cmds.size() >= history_max) {
+            std::cout << "history log is too large, try [history -d] to remove all logs.\n";
+        }
+        else history_cmds.push_back(s);
+    }
+    void rm_history_inst() {
+        history_cmds.clear();
+    }
+    void disp_history_inst() {
+        int size = history_cmds.size();
+        for (int i = 0; i < size; i++) {
+            std::cout << i + 1 << "\t" << history_cmds[i] << '\n';
+        }
+    }
+    void disp_history_inst(int n) {
+        int size = history_cmds.size();
+        for (int i = n - 1; i >= 0; i--) {
+            std::cout << size - i << "\t" << history_cmds[size - i] << '\n';
+        }
+    }
+};
+
+history* history_ptr;
  /*
      int split_string(char* string, char *sep, char** string_clips);
 
@@ -50,7 +128,6 @@ void convert_chpp_svs(std::vector<std::string>& argv, int argc, char** arg_ptrs)
 }
 
 int split_string(char* string, char* sep, char** string_clips) {
-
     char string_dup[MAX_BUF_SIZE];
     string_clips[0] = strtok(string, sep);
     int clip_num = 0;
@@ -80,26 +157,95 @@ int split_string(char* string, char* sep, char** string_clips) {
     return:
         int, 若执行成功返回0，否则返回值非零
 */
-int exec_builtin(std::vector<std::string>& argv, int* fd) {
-    int argc = argv.size();
+
+int exec_builtin(int argc, char** argv, int* fd) {
     if (argc == 0) {
         return 0;
     }
-    /* TODO: 添加和实现内置指令 */
-
-    if (argv[0] == "cd") {
-        if (argc == 1) {
-            printf("no list\n");
-            return 0;
-        }
-        if (chdir(argv[1].data()) != 0) {
-            printf("not find\n");
-            return 0;
+    if (strcmp(argv[0], "cd") == 0) {
+        if (argc <= 1) {
+            std::cout << "Insufficient arguments.\n";
         }
 
+        int _ret = chdir(argv[1]);
+        if (_ret < 0) {
+            std::cout << "cd failed.\n";
+        }
+        return 0;
     }
-    else if (argv[0] == "exit") {
-        exit(0);
+    else if (strcmp(argv[0], "pwd") == 0) {
+        // 预先分配好空间
+        std::string cwd;
+        cwd.resize(PATH_MAX);
+        const char* _ret = getcwd(&cwd[0], PATH_MAX);
+        if (_ret == nullptr) {
+            std::cout << "cwd failed.\n";
+        }
+        else {
+            std::cout << _ret << "\n";
+        }
+        return 0;
+    }
+    else if (strcmp(argv[0], "export") == 0) {
+        for (int i = 1; i < argc; i++) {
+            std::string cmd = argv[i];
+            std::string key;
+            std::string value;
+
+            size_t pos;
+            if ((pos = cmd.find('=')) != std::string::npos) {
+                key = cmd.substr(0, pos);
+                value = cmd.substr(pos + 1);
+            }
+
+            int _ret = setenv(key.data(), value.data(), 1);
+            if (_ret < 0) {
+                std::cout << "export failed.\n";
+            }
+        }
+        return 0;
+    }
+    else if (strcmp(argv[0], "exit") == 0) {
+        if (argc <= 1) {
+            exit(0);
+            return 0;
+        }
+
+        // atoi
+        int code = 0;
+        try {
+            code = atoi(argv[1]);
+        }
+        catch (...) {
+            std::cout << "invalid parameter.\n";
+        }
+        exit(code);
+        return 0;
+    }
+    else if (strcmp(argv[0], "history") == 0) {
+        if (argc <= 1) {
+            history_ptr->disp_history_inst();
+        }
+        else if (strcmp(argv[1], "-d") == 0) {
+            // 命令是 history -d
+            if (argc <= 2) {
+                history_ptr->rm_history_inst();
+            }
+            else {
+                std::cout << "invalid num of parameter.\n";
+            }
+        }
+        else if (argc <= 2) {
+            // 命令是 history n
+            int _num = 0;
+            try {
+                _num = atoi(argv[1]);
+                history_ptr->disp_history_inst(_num);
+            }
+            catch (...) {
+                std::cout << "invalid parameter.\n"
+            }
+        }
         return 0;
     }
     else {
@@ -107,33 +253,6 @@ int exec_builtin(std::vector<std::string>& argv, int* fd) {
         return -1;
     }
 }
-
-// int exec_builtin(int argc, char** argv, int* fd) {
-//     if (argc == 0) {
-//         return 0;
-//     }
-//     /* TODO: 添加和实现内置指令 */
-
-//     if (strcmp(argv[0], "cd") == 0) {
-//         if (argc == 1) {
-//             printf("no list\n");
-//             return 0;
-//         }
-//         if (chdir(argv[1]) != 0) {
-//             printf("not find\n");
-//             return 0;
-//         }
-
-//     }
-//     else if (strcmp(argv[0], "exit") == 0) {
-//         exit(0);
-//         return 0;
-//     }
-//     else {
-//         // 不是内置指令时
-//         return -1;
-//     }
-// }
 
 /*
     从argv中删除重定向符和随后的参数，并打开对应的文件，将文件描述符放在fd数组中。
@@ -147,110 +266,56 @@ int exec_builtin(std::vector<std::string>& argv, int* fd) {
         int, 返回处理过重定向后命令的参数个数
 */
 
-int process_redirect(std::vector<std::string>& argv, int* fd) {
-    auto argc = argv.size();
-    bool flag = false;
+int process_redirect(int argc, char** argv, int* fd) {
     /* 默认输入输出到命令行，即输入STDIN_FILENO，输出STDOUT_FILENO */
     fd[READ_END] = STDIN_FILENO;
     fd[WRITE_END] = STDOUT_FILENO;
-
-    int tfd;
-    if (argv[argc - 2] == ">") {
-        //TODO: 打开输出文件从头写入
-        tfd = open(argv[argc - 1].data(), O_RDWR | O_CREAT | O_TRUNC, 0664);
-        if (tfd < 0) {
-            printf("open '%s' error: %s\n", argv[argc - 1].data(), strerror(errno));
+    int i = 0, j = 0;
+    while (i < argc) {
+        int tfd;
+        if (strcmp(argv[i], ">") == 0) {
+            //TODO: 打开输出文件从头写入
+            tfd = open(argv[i + 1], O_RDWR | O_CREAT | O_TRUNC, 0664);
+            if (tfd < 0) {
+                printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
+            }
+            else {
+                //TODO: 输出重定向
+                fd[1] = tfd;
+            }
+            i += 2;
+        }
+        else if (strcmp(argv[i], ">>") == 0) {
+            //TODO: 打开输出文件追加写入
+            tfd = open(argv[i + 1], O_RDWR | O_CREAT | O_APPEND);
+            if (tfd < 0) {
+                printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
+            }
+            else {
+                //TODO:输出重定向
+                fd[1] = tfd;
+            }
+            i += 2;
+        }
+        else if (strcmp(argv[i], "<") == 0) {
+            //TODO: 读输入文件
+            tfd = open(argv[i + 1], O_RDONLY);
+            if (tfd < 0) {
+                printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
+            }
+            else {
+                //TODO:输出重定向
+                fd[0] = tfd;
+            }
+            i += 2;
         }
         else {
-            //TODO: 输出重定向
-            fd[1] = tfd;
+            argv[j++] = argv[i++];
         }
-        flag = true;
     }
-    else if (argv[argc - 2] == ">>") {
-        //TODO: 打开输出文件追加写入
-        tfd = open(argv[argc - 1].data(), O_RDWR | O_CREAT | O_APPEND);
-        if (tfd < 0) {
-            printf("open '%s' error: %s\n", argv[argc - 1].data(), strerror(errno));
-        }
-        else {
-            //TODO:输出重定向
-            fd[1] = tfd;
-        }
-        flag = true;
-    }
-    else if (argv[argc - 2] == "<") {
-        //TODO: 读输入文件
-        tfd = open(argv[argc - 1].data(), O_RDONLY);
-        if (tfd < 0) {
-            printf("open '%s' error: %s\n", argv[argc - 1].data(), strerror(errno));
-        }
-        else {
-            //TODO:输出重定向
-            fd[0] = tfd;
-        }
-        flag = true;
-    }
-    if (flag) {
-        argv.pop_back();
-        argv.pop_back();
-        //TODO: erase processed redirecting argvs
-        //argv[j] = NULL;
-        return argc - 2;   // 新的argc
-    }
-    return argc;
+    argv[j] = NULL;
+    return j;   // 新的argc
 }
-
-// int process_redirect(int argc, char** argv, int* fd) {
-//     /* 默认输入输出到命令行，即输入STDIN_FILENO，输出STDOUT_FILENO */
-//     fd[READ_END] = STDIN_FILENO;
-//     fd[WRITE_END] = STDOUT_FILENO;
-//     int i = 0, j = 0;
-//     while (i < argc) {
-//         int tfd;
-//         if (strcmp(argv[i], ">") == 0) {
-//             //TODO: 打开输出文件从头写入
-//             tfd = open(argv[i + 1], O_RDWR | O_CREAT | O_TRUNC, 0664);
-//             if (tfd < 0) {
-//                 printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
-//             }
-//             else {
-//                 //TODO: 输出重定向
-//                 fd[1] = tfd;
-//             }
-//             i += 2;
-//         }
-//         else if (strcmp(argv[i], ">>") == 0) {
-//             //TODO: 打开输出文件追加写入
-//             tfd = open(argv[i + 1], O_RDWR | O_CREAT | O_APPEND);
-//             if (tfd < 0) {
-//                 printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
-//             }
-//             else {
-//                 //TODO:输出重定向
-//                 fd[1] = tfd;
-//             }
-//             i += 2;
-//         }
-//         else if (strcmp(argv[i], "<") == 0) {
-//             //TODO: 读输入文件
-//             tfd = open(argv[i + 1], O_RDONLY);
-//             if (tfd < 0) {
-//                 printf("open '%s' error: %s\n", argv[i + 1], strerror(errno));
-//             }
-//             else {
-//                 //TODO:输出重定向
-//                 fd[0] = tfd;
-//             }
-//             i += 2;
-//         }
-//         else {
-//             argv[j++] = argv[i++];
-//         }
-//     }
-//     argv[j] = NULL;
-//     return j;   // 新的argc
-// }
 
 
 
@@ -263,44 +328,26 @@ int process_redirect(std::vector<std::string>& argv, int* fd) {
     return:
         int, 若执行成功则不会返回（进程直接结束），否则返回非零
 */
-int execute(std::vector<std::string>& argv) {
-    auto argc = argv.size();
+
+int execute(int argc, char** argv) {
     int fd[2];
     // 默认输入输出到命令行，即输入STDIN_FILENO，输出STDOUT_FILENO 
     fd[READ_END] = STDIN_FILENO;
     fd[WRITE_END] = STDOUT_FILENO;
     // 处理重定向符，如果不做本部分内容，请注释掉process_redirect的调用
-    argc = process_redirect(argv, fd);
-    if (exec_builtin(argv, fd) == 0) {
+    argc = process_redirect(argc, argv, fd);
+    if (exec_builtin(argc, argv, fd) == 0) {
         exit(0);
     }
     // 将标准输入输出STDIN_FILENO和STDOUT_FILENO修改为fd对应的文件
     dup2(fd[READ_END], STDIN_FILENO);
     dup2(fd[WRITE_END], STDOUT_FILENO);
     /* TODO:运行命令与结束 */
-    char* argv_c[argc+1];
-    convert_svs_chpp(argv, argc, argv_c);
-    execvp(argv[0].data(), argv_c);
+    execvp(argv[0], argv);
 }
 
-// int execute(int argc, char** argv) {
-//     int fd[2];
-//     // 默认输入输出到命令行，即输入STDIN_FILENO，输出STDOUT_FILENO 
-//     fd[READ_END] = STDIN_FILENO;
-//     fd[WRITE_END] = STDOUT_FILENO;
-//     // 处理重定向符，如果不做本部分内容，请注释掉process_redirect的调用
-//     argc = process_redirect(argc, argv, fd);
-//     if (exec_builtin(argc, argv, fd) == 0) {
-//         exit(0);
-//     }
-//     // 将标准输入输出STDIN_FILENO和STDOUT_FILENO修改为fd对应的文件
-//     dup2(fd[READ_END], STDIN_FILENO);
-//     dup2(fd[WRITE_END], STDOUT_FILENO);
-//     /* TODO:运行命令与结束 */
-//     execvp(argv[0], argv);
-// }
-
 int main() {
+    history_ptr = new history;
     /* 输入的命令行 */
     char cmdline[MAX_CMDLINE_LENGTH];
     char* complete_commands[128];
@@ -312,11 +359,10 @@ int main() {
         char current_path[200];
         getcwd(current_path, 200);
 
-        std::cout << "\033[32m" << current_path << "\033[33m" << " # \033[0m";
+        std::cout << "\033[32m" << current_path << "\033[34m" << " # \033[0m";
 
         fflush(stdout);
 
-    
         fgets(cmdline, 256, stdin);
         strtok(cmdline, "\n");
 
@@ -334,12 +380,12 @@ int main() {
                 int argc;
                 int fd[2];
                 /* TODO:处理参数，分出命令名和参数*/
-                char* spa = " ";
-                argc = split_string(commands[0], spa, argv);
-                std::vector<std::string> argv_cpp;
-                convert_chpp_svs(argv_cpp, argc, argv);
+                //char* spa = " ";
+                argc = split_string(commands[0], " ", argv);
+                // std::vector<std::string> argv_cpp;
+                // convert_chpp_svs(argv_cpp, argc, argv);
                 /* 在没有管道时，内建命令直接在主进程中完成，外部命令通过创建子进程完成 */
-                if (exec_builtin(argv_cpp, fd) == 0) {
+                if (exec_builtin(argc, argv, fd) == 0) {
                     continue;
                 }
                 /* TODO:创建子进程，运行命令，等待命令运行结束*/
@@ -347,7 +393,7 @@ int main() {
                 pid = fork();
                 if (pid == 0) {
                     //子进程（紫禁城！）
-                    if (execute(argv_cpp) != 0) {
+                    if (execute(argc, argv) != 0) {
                         exit(-1);
                     }
                 }
@@ -372,11 +418,11 @@ int main() {
                     if (pid == 0) {
                         char* argv[MAX_CMD_ARG_NUM];
                         int argc = split_string(commands[i], " ", argv);
-                        std::vector<std::string> argv_cpp;
-                        convert_chpp_svs(argv_cpp, argc, argv);
-                        for (auto& i : argv_cpp) {
-                            std::cout << i << ';';
-                        }
+                        // std::vector<std::string> argv_cpp;
+                        // convert_chpp_svs(argv_cpp, argc, argv);
+                        // for (auto& i : argv_cpp) {
+                        //     std::cout << i << ';';
+                        // }
                         /* TODO:除了最后一条命令外，都将标准输出重定向到当前管道入口*/
                         if (i < cmd_count - 1) {
                             dup2(pipefd[1], STDOUT_FILENO);
@@ -389,7 +435,7 @@ int main() {
                          * 在使用管道时，为了可以并发运行，所以内建命令也在子进程中运行
                          * 因此我们用了一个封装好的execute函数*/
 
-                        execute(argv_cpp);
+                        execute(argc, argv);
                         exit(255);
                     }
                     /* 父进程除了第一条命令，都需要关闭当前命令用完的上一个管道读端口
