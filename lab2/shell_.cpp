@@ -17,6 +17,7 @@
 #define READ_END 0      // pipe read end
 
 bool is_debug = false;
+bool is_exit = false;
 
 std::string path1 = "/home/";
 std::string path2 = "/.sprout_history";
@@ -227,19 +228,16 @@ int exec_builtin(int argc, char** argv, int* fd) {
         return 0;
     }
     else if (strcmp(argv[0], "exit") == 0) {
-        if (argc <= 1) {
-            history_ptr->~history();
-            exit(0);
-            return 0;
-        }
-
-        // atoi
         int code = 0;
-        try {
-            code = atoi(argv[1]);
-        }
-        catch (...) {
-            std::cout << "invalid parameter.\n";
+        if (argc > 1) {
+            // atoi
+            try {
+                code = atoi(argv[1]);
+            }
+            catch (...) {
+                std::cout << "invalid parameter.\n";
+                return 0;
+            }
         }
         history_ptr->~history();
         exit(code);
@@ -370,7 +368,32 @@ int execute(int argc, char** argv) {
     return 0;
 }
 
+//int pid_shell;
+
+void prompt() {
+    char current_path[200];
+    getcwd(current_path, 200);
+
+    std::cout << "\033[32m" << current_path << "\033[34m" << " # \033[0m";
+}
+
+void sigint_exit(int exit_code) {
+    is_exit = true;
+    int status;
+    int ret = waitpid(0, &status, WNOHANG);
+    if (ret == -1) {
+        std::cout << '\n';
+        prompt();
+        fflush(stdout);
+    }
+    return;
+}
+
 int main() {
+    // 处理ctrl+c
+    //int status;
+    signal(SIGINT, sigint_exit);
+
     history_ptr = new history;
     /* 输入的命令行 */
     char cmdline[MAX_CMDLINE_LENGTH];
@@ -379,25 +402,24 @@ int main() {
     int count;
     int cmd_count;
     while (true) {
-        /* TODO: 增加打印当前目录，格式类似"shell:/home/oslab ->"，你需要改下面的printf */
-        char current_path[200];
-        getcwd(current_path, 200);
+        int _status;
+        signal(SIGINT, sigint_exit);
+        prompt();
 
-        std::cout << "\033[32m" << current_path << "\033[34m" << " # \033[0m";
-
+        fflush(stdin);
         fflush(stdout);
 
         fgets(cmdline, 256, stdin);
-
-        std::string backup_command = cmdline;
-        backup_command = backup_command.substr(0, backup_command.length() - 1);
-
         strtok(cmdline, "\n");
 
+        std::string backup_command = cmdline; // std::string 备份
+        if (backup_command[backup_command.size() - 1] == '\n') 
+            backup_command = backup_command.substr(0, backup_command.length() - 1); // 去除备份末尾的\n
+
         if (strcmp(cmdline, "!!") == 0) {
-            strcpy(cmdline, history_ptr->get_history_by_number().data());
+            strcpy(cmdline, history_ptr->get_history_by_number().data()); // 如果cmdline是!!，则把cmdlin换成history最后一条
         }
-        else if (cmdline[0] == '!') {
+        else if (cmdline[0] == '!') { // 如果是 !num，先转换后者
             int number = INT_MIN;
             try {
                 number = atoi(split(backup_command.substr(1), " ")[0].data());
@@ -407,12 +429,21 @@ int main() {
                 std::cout << "invalid instruction.\n";
                 continue;
             }
-            strcpy(cmdline, history_ptr->get_history_by_number(number).data());
+            strcpy(cmdline, history_ptr->get_history_by_number(number).data()); // 把cmdlin换成history第number条
         }
+
+        backup_command = cmdline;
+        if (backup_command[backup_command.size() - 1] == '\n') 
+            backup_command = backup_command.substr(0, backup_command.length() - 1); // 更新备份
 
         /* TODO: 基于";"的多命令执行，请自行选择位置添加 */
         count = split_string(cmdline, ";", complete_commands);
         for (int j = 0; j < count; j++) {
+            // 不接受后面的指令了
+            if (is_exit) {
+                is_exit = false;
+                break;
+            }
             /* 由管道操作符'|'分割的命令行各个部分，每个部分是一条命令 */
             /* 拆解命令行 */
             cmd_count = split_string(complete_commands[j], "|", commands);
@@ -424,10 +455,7 @@ int main() {
                 int argc;
                 int fd[2];
                 /* TODO:处理参数，分出命令名和参数*/
-                //char* spa = " ";
                 argc = split_string(commands[0], " ", argv);
-                // std::vector<std::string> argv_cpp;
-                // convert_chpp_svs(argv_cpp, argc, argv);
                 /* 在没有管道时，内建命令直接在主进程中完成，外部命令通过创建子进程完成 */
                 if (exec_builtin(argc, argv, fd) == 0) {
                     continue;
@@ -436,8 +464,9 @@ int main() {
                 pid_t pid;
                 pid = fork();
                 if (pid == 0) {
-                    //子进程（紫禁城！）
+                    //子进程
                     if (execute(argc, argv) != 0) {
+                        //waitpid(pid, &_status, 0);
                         exit(-1);
                     }
                 }
@@ -493,126 +522,14 @@ int main() {
                             if (i < cmd_count) read_fd = pipefd[0];
                             close(pipefd[WRITE_END]);
                         }
+                        // // 处理ctrl-c
+                        // int status;
+                        // waitpid(pid, &status, 0);
                     }
                 }
                 // TODO:等待所有子进程结束
-
-
             }
         }
         history_ptr->add_history_inst(backup_command);
     }
 }
-
-
-// int main() {
-//     /* 输入的命令行 */
-//     //char cmdline[MAX_CMDLINE_LENGTH];
-//     std::string cmdline;
-//     char* complete_commands[128];
-//     char* commands[128];
-//     int cmd_count;
-//     while (true) {
-//         /* TODO: 增加打印当前目录，格式类似"shell:/home/oslab ->"，你需要改下面的printf */
-//         char current_path[200];
-//         getcwd(current_path, 200);
-
-//         printf("shell:%s -> ", current_path);
-//         fflush(stdout);
-
-//         std::getline(std::cin, cmdline);
-
-//         auto atom_cmds = split(cmdline, ";");
-//         auto atom_cmds_len = atom_cmds.size();
-
-//         char* complete_commands[atom_cmds_len + 1];
-//         convert_svs_chpp(atom_cmds, atom_cmds_len, complete_commands);
-//         for (int j = 0; j < atom_cmds_len; j++) {
-//             /* 由管道操作符'|'分割的命令行各个部分，每个部分是一条命令 */
-//             /* 拆解命令行 */
-//             auto quark_cmds = split(atom_cmds[j], "|");
-//             auto quark_cmds_len = quark_cmds.size();
-
-//             //cmd_count = split_string(complete_commands[j], "|", commands);
-//             if (quark_cmds_len == 0) {
-//                 continue;
-//             }
-//             else if (quark_cmds_len == 1) {     // 没有管道的单一命令
-//                 auto argv = split(quark_cmds[0], " ");
-
-
-//                 // char* argv[MAX_CMD_ARG_NUM];
-//                 // int argc;
-//                 int fd[2];
-//                 /* TODO:处理参数，分出命令名和参数*/
-//                 // char* spa = " ";
-//                 //argc = split_string(commands[0], spa, argv);
-//                 /* 在没有管道时，内建命令直接在主进程中完成，外部命令通过创建子进程完成 */
-//                 if (exec_builtin(argv, fd) == 0) {
-//                     continue;
-//                 }
-//                 /* TODO:创建子进程，运行命令，等待命令运行结束*/
-//                 pid_t pid;
-//                 pid = fork();
-
-//                 if (pid == 0) {
-//                     //子进程（紫禁城！）
-//                     if (execute(argv) != 0) {
-//                         exit(-1);
-//                     }
-//                 }
-//                 else if (pid > 0) {
-//                     wait(NULL);
-//                 }
-
-//             }
-//             else {    // 选做：三个以上的命令
-//                 int read_fd;    // 上一个管道的读端口（出口）
-//                 for (int i = 0; i < quark_cmds_len; i++) {
-//                     int pipefd[2];
-//                     /* TODO:创建管道，n条命令只需要n-1个管道，所以有一次循环中是不用创建管道的*/
-//                     if (i < quark_cmds_len - 1) {
-//                         int ret = pipe(pipefd);
-//                         if (ret < 0) {
-//                             printf("pipe error!\n");
-//                             continue;
-//                         }
-//                     }
-//                     int pid = fork();
-//                     if (pid == 0) {
-//                         /* TODO:除了最后一条命令外，都将标准输出重定向到当前管道入口*/
-//                         if (i < quark_cmds_len - 1) {
-//                             dup2(pipefd[1], STDOUT_FILENO);
-//                         }
-//                         /* TODO:除了第一条命令外，都将标准输入重定向到上一个管道出口*/
-//                         if (i > 0) {
-//                             dup2(read_fd, STDIN_FILENO);
-//                         }
-//                         /* TODO:处理参数，分出命令名和参数，并使用execute运行
-//                          * 在使用管道时，为了可以并发运行，所以内建命令也在子进程中运行
-//                          * 因此我们用了一个封装好的execute函数*/
-
-//                         auto argv = split(quark_cmds[i], " ");
-//                         //char* argv[MAX_CMD_ARG_NUM];
-//                         //int argc = split_string(commands[i], " ", argv);
-//                         execute(argv);
-//                         exit(255);
-//                     }
-//                     /* 父进程除了第一条命令，都需要关闭当前命令用完的上一个管道读端口
-//                      * 父进程除了最后一条命令，都需要保存当前命令的管道读端口
-//                      * 记得关闭父进程没用的管道写端口 */
-//                      // 因为在shell的设计中，管道是并发执行的，所以我们不在每个子进程结束后才运行下一个
-//                      // 而是直接创建下一个子进程
-//                     if (pid > 0) {
-//                         while (wait(nullptr) > 0) {
-//                             if (i > 0) close(read_fd);
-//                             if (i < quark_cmds_len) read_fd = pipefd[0];
-//                             close(pipefd[WRITE_END]);
-//                         }
-//                     }
-//                 }
-//                 // TODO:等待所有子进程结束
-//             }
-//         }
-//     }
-// }
