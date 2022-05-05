@@ -8,10 +8,6 @@
 #include <sstream>
 // PATH_MAX 等常量
 #include <climits>
-// POSIX API
-#include <unistd.h>
-// wait
-#include <sys/wait.h>
 
 // trim from left
 inline std::string &LeftTrim(std::string &s, const char *t = " \t\n\r\f\v") {
@@ -92,4 +88,19 @@ std::vector<std::string> split(std::string s, const std::string &delimiter) {
     }
 
     return res;
+}
+
+// 将std::vector<std::string>转换成char**，需要给定转换的参数
+void convert_svs_chpp(std::vector<std::string>& argv, int argc, char** arg_ptrs) {
+    for (auto i = 0; i < argc; i++) {
+        arg_ptrs[i] = &argv[i][0];
+    }
+    arg_ptrs[argv.size()] = nullptr;
+}
+
+void convert_chpp_svs(std::vector<std::string>& argv, int argc, char** arg_ptrs) {
+    argv.clear();
+    for (auto i = 0; i < argc; i++) {
+        argv.push_back(arg_ptrs[i]);
+    }
 }
