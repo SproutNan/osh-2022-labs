@@ -18,7 +18,4 @@
  - 支持Ctrl-C处理
  - 支持`echo ~root`,  `echo 含有$HOME的字符串`, `echo 含有$SHELL的字符串`, `echo 一般字符串`
  - 支持`A=1 B=3 env`之类设置环境变量的语法
- 
-# Lab2 STARCE部分
 
-TBD
