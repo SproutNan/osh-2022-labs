@@ -267,6 +267,16 @@ int exec_builtin(int argc, char** argv) {
                 std::cout << mess << '\n';
                 return 0;
             }
+            else if (mess.substr(0,2) == "~/") {
+                char* home = getenv("HOME");
+                std::string home_s = home;
+                mess = home_s + mess.substr(2);
+                std::cout << mess << '\n';
+            }
+            else if (mess == "~") {
+                char* home = getenv("HOME");
+                std::cout << home << '\n';
+            }
             else {
                 std::cout << mess << '\n';
                 return 0;

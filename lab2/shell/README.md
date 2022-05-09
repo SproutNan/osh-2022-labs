@@ -16,6 +16,6 @@
  - 支持`;`分隔的多命令
  - 重定向支持`fd>`, `fd<`, `fd1>&fd2`语法
  - 支持Ctrl-C处理
- - 支持`echo ~root`,  `echo 含有$HOME的字符串`, `echo 含有$SHELL的字符串`, `echo 一般字符串`
+ - 支持`echo ~/...`, `echo ~root`,  `echo 含有$HOME的字符串`, `echo 含有$SHELL的字符串`, `echo 一般字符串`
  - 支持`A=1 B=3 env`之类设置环境变量的语法
 
