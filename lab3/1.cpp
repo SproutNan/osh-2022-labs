@@ -1,0 +1,105 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <pthread.h>
+
+#include <string>
+#include <vector>
+
+#define MAX_SINGLE_MESSAGE_CLIP_NUM 128     // 单条消息最多段数
+#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 单条消息最大长度，超过此条消息将被识别为大消息
+
+struct Pipe {
+    int fd_send;
+    int fd_recv;
+};
+
+// 分割
+std::vector<std::string> split(char* str, const std::string &delimiter) {
+    std::string s = str;
+    std::vector<std::string> res;
+    size_t pos = 0;
+    std::string token;
+    while ((pos = s.find(delimiter)) != std::string::npos) {
+        token = s.substr(0, pos);
+        res.push_back(token);
+        s = s.substr(pos + delimiter.length());
+    }
+    if (s.length()) {
+        res.push_back(s);
+    }
+    return res;
+}
+
+void *handle_chat(void *data) {
+    struct Pipe *pipe = (struct Pipe *)data; // 在线程中解引用
+    // ssize_t len; // 获得的消息长度
+    while (1) {
+        char buffer[MAX_SINGLE_MESSAGE_LENGTH] = "";
+        ssize_t len = recv(pipe->fd_send, buffer, MAX_SINGLE_MESSAGE_LENGTH, 0);
+        // send(pipe->fd_recv, std::to_string(len).data(), std::to_string(len).length(), 0);
+
+        if (len <= 0) break;
+
+        std::vector<std::string> messes = split(buffer, "\n");
+        int clip_num = messes.size(); // 等待发送的消息列表
+        for (int i = 0; i < clip_num; i++) {
+            if (messes[i].length()) {
+                std::string mess = " [Message]";
+                mess += messes[i];
+                mess += "\n";
+                int send_len = 0;
+                do {
+                    int send_num = send(pipe->fd_recv, mess.data(), mess.length(), 0); // 本次发送的字符数
+                    mess = mess.substr(send_num); // 假如本次发了4个字符，就要从原来字符串的第4个字符重新开始发
+                    send_len = mess.length(); // 需要发送的字符数
+                } while (send_len);
+            }
+        }
+    }
+    return NULL;
+}
+
+int main(int argc, char **argv) {
+    int port = atoi(argv[1]);
+    int fd;
+    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket");
+        return 1;
+    }
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+    socklen_t addr_len = sizeof(addr);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr))) {
+        perror("bind");
+        return 1;
+    }
+    if (listen(fd, 2)) {
+        perror("listen");
+        return 1;
+    }
+    int fd1 = accept(fd, NULL, NULL);
+    int fd2 = accept(fd, NULL, NULL);
+    if (fd1 == -1 || fd2 == -1) {
+        perror("accept");
+        return 1;
+    }
+    pthread_t thread1, thread2;
+    struct Pipe pipe1;
+    struct Pipe pipe2;
+    pipe1.fd_send = fd1;
+    pipe1.fd_recv = fd2;
+    pipe2.fd_send = fd2;
+    pipe2.fd_recv = fd1;
+    pthread_create(&thread1, NULL, handle_chat, (void *)&pipe1);
+    pthread_create(&thread2, NULL, handle_chat, (void *)&pipe2);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    return 0;
+}
+
