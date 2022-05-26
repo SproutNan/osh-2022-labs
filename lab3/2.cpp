@@ -36,7 +36,6 @@ typedef struct Client {
 	pthread_t thread;
 } Client;
 
-
 void* handle_chat(void *data);
 
 Client clients[MAX_CLIENT_NUMBER];
@@ -104,7 +103,7 @@ ssize_t receive(Client *client, void *buf, size_t n) {
 	return size;
 }
 
-void *handle_chat(void *data) {
+void* handle_chat(void *data) {
     Client* user = (Client*) data; // 在线程中解引用
 
     while (1) {
@@ -135,6 +134,8 @@ void *handle_chat(void *data) {
     return NULL;
 }
 
+
+
 int main(int argc, char **argv) {
     int port = atoi(argv[1]);
     int fd;
@@ -162,7 +163,6 @@ int main(int argc, char **argv) {
     }
 	do {
 		int new_fd = accept(fd, NULL, NULL);
-        printf("%d\n", fd);
 		if (new_fd == -1) {
 			perror("accept");
 			return 0;
