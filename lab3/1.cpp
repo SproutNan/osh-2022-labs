@@ -6,10 +6,11 @@
 #include <netinet/in.h>
 #include <pthread.h>
 
+// #include <pair>
 #include <string>
 #include <vector>
 
-#define MAX_SINGLE_MESSAGE_CLIP_NUM 128     // 单条消息最多段数
+// #define MAX_SINGLE_MESSAGE_CLIP_NUM 128     // 单条消息最多段数
 #define MAX_SINGLE_MESSAGE_LENGTH   1024    // 单条消息最大长度，超过此条消息将被识别为大消息
 
 struct Pipe {
@@ -17,8 +18,8 @@ struct Pipe {
     int fd_recv;
 };
 
-// 分割
-std::vector<std::string> split(char* str, const std::string &delimiter) {
+// 按delimiter分割
+std::pair<std::vector<std::string>, int> split(char* str, const std::string &delimiter) {
     std::string s = str;
     std::vector<std::string> res;
     size_t pos = 0;
@@ -31,7 +32,7 @@ std::vector<std::string> split(char* str, const std::string &delimiter) {
     if (s.length()) {
         res.push_back(s);
     }
-    return res;
+    return std::pair<std::vector<std::string>, int>(res, res.size());
 }
 
 void *handle_chat(void *data) {
@@ -44,8 +45,9 @@ void *handle_chat(void *data) {
 
         if (len <= 0) break;
 
-        std::vector<std::string> messes = split(buffer, "\n");
-        int clip_num = messes.size(); // 等待发送的消息列表
+        auto mess_box = split(buffer, "\n");
+        auto messes = mess_box.first;
+        auto clip_num = mess_box.second;
         for (int i = 0; i < clip_num; i++) {
             if (messes[i].length()) {
                 std::string mess = " [Message]";
