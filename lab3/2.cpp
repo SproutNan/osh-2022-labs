@@ -33,7 +33,6 @@ std::pair<std::vector<std::string>, int> split(char* str, const std::string &del
 typedef struct Client {
     bool connected;
     int fd;
-	// pthread_mutex_t mutex;
 	pthread_t thread;
 } Client;
 
@@ -57,7 +56,6 @@ void client_destroy(Client* user) {
     user->connected = false;
     close(user->fd);
     valid_clients_num--;
-    // pthread_mutex_destroy(&user->mutex);
     pthread_mutex_unlock(&ClientsMutex);
 
     printf("Client left, %d in total\n", valid_clients_num);
@@ -88,7 +86,7 @@ int client_add(int fd) {
 	return index;
 }
 
-ssize_t send_to_all(Client *client, std::string s, size_t n) {
+ssize_t send_all(Client *client, std::string s, size_t n) {
 	int size = 0;
 	for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
 		if (clients[i].connected && (clients + i) != client) {
@@ -153,7 +151,7 @@ void* handle_send(void* data) {
                     mess += "\n";
                     int send_len = 0;
                     do {
-                        int send_num = send_to_all(user, mess, mess.length()); // 本次发送的字符数
+                        int send_num = send_all(user, mess, mess.length()); // 本次发送的字符数
                         mess = mess.substr(send_num); // 假如本次发了4个字符，就要从原来字符串的第4个字符重新开始发
                         send_len = mess.length(); // 需要发送的字符数
                     } while (send_len);
