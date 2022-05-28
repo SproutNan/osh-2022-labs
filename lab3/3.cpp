@@ -12,7 +12,7 @@
 #include <queue>
 
 #define MAX_CLIENT_NUMBER           32
-#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 单条消息最大长度，超过此条消息将被识别为大消息
+#define MAX_SINGLE_MESSAGE_LENGTH   1025    // size of buffer
 
 // 按delimiter分割：copied from ta's lab2
 std::pair<std::vector<std::string>, int> split(char* str, const std::string &delimiter) {
@@ -42,11 +42,11 @@ void display_client() {
     }
     putchar('\n');
 }
+
 void client_destroy(std::pair<bool, int>* user) {
     user->first = false;
     close(user->second);
     connected_clients_num--;
-    printf("Client left, %d in total\n", connected_clients_num);
 }
 
 int client_add(int fd) {
@@ -64,8 +64,6 @@ int client_add(int fd) {
     clients_list[index].first = true;
     clients_list[index].second = fd;
     connected_clients_num++;
-	
-    printf("New client entered, %d in total\n", connected_clients_num);
 
 	return index;
 }
@@ -138,13 +136,20 @@ int main(int argc, char **argv) {
                 if (clients_list[i].first) {
                     if (FD_ISSET(clients_list[i].second, &clients)) {
                         // ready
+                        bool flag = true;
                         while (true) { 
                             char buffer[MAX_SINGLE_MESSAGE_LENGTH] = "";
-                            ssize_t len = receive(&clients_list[i], buffer, MAX_SINGLE_MESSAGE_LENGTH);
+                            ssize_t len = receive(&clients_list[i], buffer, MAX_SINGLE_MESSAGE_LENGTH - 1);
+                            // printf("%s\n", buffer);
 
                             if (len <= 0) {
+                                if (flag) {
+                                    client_destroy(&clients_list[i]);
+                                }
                                 break;
                             }
+
+                            flag = false;
 
                             if (strcmp(buffer, "quit()\n") == 0) {
                                 client_destroy(&clients_list[i]);
@@ -156,11 +161,10 @@ int main(int argc, char **argv) {
                             auto clip_num = mess_box.second;
 
                             for (int j = 0; j < clip_num; j++) {
-                                // if (j == clip_num - 1 && *(messes.rbegin()->rbegin()) == EOF) {
-                                //     printf("find a eof, replace by '!'");
-                                //     messes[j][messes[j].length()-1] = '!';
-                                // }
                                 if (messes[j].length()) {
+                                    if (*(messes[j].rbegin()) != '\0') {
+                                        messes[j] += '\0';
+                                    }
                                     char sender_address[100];
                                     sprintf(sender_address, "%p", &clients_list[i]);
                                     std::string mess = " [Message from ";
@@ -169,7 +173,6 @@ int main(int argc, char **argv) {
                                     mess += messes[j];
                                     mess += "\n";
                                     send_all(&clients_list[i], mess);
-                                    // display_client();
                                 }
                             }
                         }
