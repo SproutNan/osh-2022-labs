@@ -5,13 +5,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
-
-// #include <pair>
 #include <string>
 #include <vector>
 
-// #define MAX_SINGLE_MESSAGE_CLIP_NUM 128     // 单条消息最多段数
-#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 单条消息最大长度，超过此条消息将被识别为大消息
+#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 缓冲区长度
 
 struct Pipe {
     int fd_send;
@@ -35,9 +32,8 @@ std::pair<std::vector<std::string>, int> split(char* str, const std::string &del
     return std::pair<std::vector<std::string>, int>(res, res.size());
 }
 
-void *handle_chat(void *data) {
-    struct Pipe *pipe = (struct Pipe *)data; // 在线程中解引用
-    // ssize_t len; // 获得的消息长度
+void* handle_chat(void *data) {
+    struct Pipe* pipe = (struct Pipe*) data; // 在线程中解引用
     while (1) {
         char buffer[MAX_SINGLE_MESSAGE_LENGTH] = "";
         ssize_t len = recv(pipe->fd_send, buffer, MAX_SINGLE_MESSAGE_LENGTH, 0);

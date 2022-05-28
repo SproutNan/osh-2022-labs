@@ -5,13 +5,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
-
 #include <string>
 #include <vector>
 #include <queue>
 
 #define MAX_CLIENT_NUMBER           32
-#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 单条消息最大长度，超过此条消息将被识别为大消息
+#define MAX_SINGLE_MESSAGE_LENGTH   1024    // 缓冲区大小
 
 // 按delimiter分割：copied from ta's lab2
 std::pair<std::vector<std::string>, int> split(char* str, const std::string &delimiter) {
@@ -46,24 +45,22 @@ void* handle_chat(void *data);
 
 std::queue<Message> message_queue;
 Client clients[MAX_CLIENT_NUMBER];
-int valid_clients_num = 0;
+int connected_clients_num = 0;
 
-pthread_mutex_t ClientsMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t QueueMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t Clients_Mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t Queue_Mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void client_destroy(Client* user) {
-    pthread_mutex_lock(&ClientsMutex);
+    pthread_mutex_lock(&Clients_Mutex);
     user->connected = false;
     close(user->fd);
-    valid_clients_num--;
-    pthread_mutex_unlock(&ClientsMutex);
-
-    printf("Client left, %d in total\n", valid_clients_num);
+    connected_clients_num--;
+    pthread_mutex_unlock(&Clients_Mutex);
 }
 
 int client_add(int fd) {
     int index = -1;
-    pthread_mutex_lock(&ClientsMutex);
+    pthread_mutex_lock(&Clients_Mutex);
     for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
         if (!clients[i].connected) {
             index = i;
@@ -71,36 +68,30 @@ int client_add(int fd) {
         }
     }
     if (index < 0) {
-        pthread_mutex_unlock(&ClientsMutex);
+        pthread_mutex_unlock(&Clients_Mutex);
         return -1;
     }
     clients[index].connected = true;
     clients[index].fd = fd;
-    valid_clients_num++;
-	pthread_mutex_unlock(&ClientsMutex);
-	// pthread_mutex_init(&clients[index].mutex, NULL);
-	pthread_create(&clients[index].thread, NULL, handle_chat, clients + index);
-	
-    printf("New client entered, %d in total\n", valid_clients_num);
+    connected_clients_num++;
+	pthread_mutex_unlock(&Clients_Mutex);
+	pthread_create(&clients[index].thread, NULL, handle_chat, static_cast<void*>(&clients[index]));
 
 	return index;
 }
 
-ssize_t send_all(Client *client, std::string s, size_t n) {
-	int size = 0;
+void send_all(Client* client, std::string s) {
 	for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
 		if (clients[i].connected && (clients + i) != client) {
-			int tmp_size = send(clients[i].fd, s.data(), n, 0);
-			printf("Send %d bytes to client %d\n", tmp_size, i);
-			if (size == 0) {
-				size = tmp_size;
-			}
-			else if (tmp_size != size) {
-				perror("Inconsistent size of data sent");
-			}
+            int send_len = 0;
+            auto mess = s;
+            do {
+                int send_num = send(clients[i].fd, mess.data(), mess.length(), 0); // 本次发送的字符数
+                mess = mess.substr(send_num); // 假如本次发了4个字符，就要从原来字符串的第4个字符重新开始发
+                send_len = mess.length(); // 需要发送的字符数
+            } while (send_len);
 		}
 	}
-	return size;
 }
 
 ssize_t receive(Client *client, void *buf, size_t n) {
@@ -114,7 +105,6 @@ void* handle_chat(void* data) {
     while (1) {
         char buffer[MAX_SINGLE_MESSAGE_LENGTH] = "";
         ssize_t len = receive(user, buffer, MAX_SINGLE_MESSAGE_LENGTH);
-        // send(pipe->fd_recv, std::to_string(len).data(), std::to_string(len).length(), 0);
 
         if (len <= 0) break;
 
@@ -126,9 +116,9 @@ void* handle_chat(void* data) {
         new_message.message_content = mess_box.first;
         new_message.sender_address = user;
 
-        pthread_mutex_lock(&QueueMutex);
+        pthread_mutex_lock(&Queue_Mutex);
         message_queue.push(new_message);
-        pthread_mutex_unlock(&QueueMutex);
+        pthread_mutex_unlock(&Queue_Mutex);
     }
     client_destroy(user);
     return NULL;
@@ -149,12 +139,7 @@ void* handle_send(void* data) {
                     std::string mess = " [Message]";
                     mess += messes[i];
                     mess += "\n";
-                    int send_len = 0;
-                    do {
-                        int send_num = send_all(user, mess, mess.length()); // 本次发送的字符数
-                        mess = mess.substr(send_num); // 假如本次发了4个字符，就要从原来字符串的第4个字符重新开始发
-                        send_len = mess.length(); // 需要发送的字符数
-                    } while (send_len);
+                    send_all(user, mess);
                 }
             }
 
@@ -201,6 +186,6 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 		client_add(new_fd);
-	} while (valid_clients_num);
+	} while (connected_clients_num);
 	return 0;
 }
