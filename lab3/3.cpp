@@ -7,34 +7,13 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <netinet/in.h>
-#include <string>
-#include <vector>
 #include <queue>
 
-#define MAX_CLIENT_NUMBER           32
-#define MAX_SINGLE_MESSAGE_LENGTH   1025    // size of buffer
+#include "0.h"
 
-// 按delimiter分割：copied from ta's lab2
-std::pair<std::vector<std::string>, int> split(char* str, const std::string &delimiter) {
-    std::string s = str;
-    std::vector<std::string> res;
-    size_t pos = 0;
-    std::string token;
-    while ((pos = s.find(delimiter)) != std::string::npos) {
-        token = s.substr(0, pos);
-        res.push_back(token);
-        s = s.substr(pos + delimiter.length());
-    }
-    if (s.length()) {
-        res.push_back(s);
-    }
-    return std::pair<std::vector<std::string>, int>(res, res.size());
-}
-
-
-std::pair<bool, int> clients_list[MAX_CLIENT_NUMBER];
+Client clients_list[MAX_CLIENT_NUMBER];
 int connected_clients_num = 0;
-struct timeval timeout = {0, 500};
+timev_t timeout = {0, 500};
 
 void display_client() {
     for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
@@ -43,7 +22,7 @@ void display_client() {
     putchar('\n');
 }
 
-void client_destroy(std::pair<bool, int>* user) {
+void client_destroy(Client* user) {
     user->first = false;
     close(user->second);
     connected_clients_num--;
@@ -68,7 +47,7 @@ int client_add(int fd) {
 	return index;
 }
 
-void send_all(std::pair<bool, int>* client, std::string s) {
+void send_all(Client* client, std::string s) {
 	for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
 		if (clients_list[i].first && &clients_list[i] != client) {
             int send_len = 1;
@@ -82,7 +61,7 @@ void send_all(std::pair<bool, int>* client, std::string s) {
 	}
 }
 
-ssize_t receive(std::pair<bool, int>* client, void *buf, size_t n) {
+ssize_t receive(Client* client, void *buf, size_t n) {
 	int size = recv(client->second, buf, n, 0);
 	return size;
 }
@@ -139,7 +118,7 @@ int main(int argc, char **argv) {
                         bool flag = true;
                         while (true) { 
                             char buffer[MAX_SINGLE_MESSAGE_LENGTH] = "";
-                            ssize_t len = receive(&clients_list[i], buffer, MAX_SINGLE_MESSAGE_LENGTH - 1);
+                            auto len = receive(&clients_list[i], buffer, MAX_SINGLE_MESSAGE_LENGTH - 1);
                             // printf("%s\n", buffer);
 
                             if (len <= 0) {
