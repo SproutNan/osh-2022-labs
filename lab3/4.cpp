@@ -32,7 +32,8 @@ void display_client() {
     putchar('\n');
 }
 
-void client_destroy(Client* user) {
+void client_destroy(int epfd, Client* user) {
+    epoll_ctl(epfd, EPOLL_CTL_DEL, user->second, 0);
     user->first = false;
     close(user->second);
     connected_clients_num--;
@@ -146,9 +147,11 @@ int main(int argc, char **argv) {
                         auto len = receive(&clients_list[index], buffer, MAX_SINGLE_MESSAGE_LENGTH - 1);
                         // printf("%s\n", buffer);
 
+                        printf("len=%ld\n", len);
+
                         if (len <= 0) {
                             if (flag) {
-                                client_destroy(&clients_list[index]);
+                                client_destroy(epfd, &clients_list[index]);
                             }
                             break;
                         }
@@ -156,7 +159,7 @@ int main(int argc, char **argv) {
                         flag = false;
 
                         if (strcmp(buffer, "quit()\n") == 0) {
-                            client_destroy(&clients_list[index]);
+                            client_destroy(epfd, &clients_list[index]);
                             break;
                         }
                         
