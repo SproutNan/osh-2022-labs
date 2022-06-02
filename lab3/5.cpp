@@ -23,6 +23,7 @@
 void add_accept(struct io_uring *ring, int fd, struct sockaddr *client_addr, socklen_t *client_len, unsigned flags);
 void add_socket_read(struct io_uring *ring, int fd, unsigned gid, size_t size, unsigned flags);
 void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t size, unsigned flags);
+void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t size, unsigned flags, const void* buf);
 void add_provide_buf(struct io_uring *ring, __u16 bid, unsigned gid);
 
 enum
@@ -41,6 +42,7 @@ typedef struct conn_info
 } conn_info;
 
 char bufs[BUFFERS_COUNT][MAX_MESSAGE_LEN] = {0};
+char buf[MAX_MESSAGE_LEN] = {0};
 int group_id = 1337;
 
 typedef struct Client_uring
@@ -233,15 +235,31 @@ int main(int argc, char *argv[])
                     add_socket_read(&ring, conn_i.fd, group_id, MAX_MESSAGE_LEN, IOSQE_BUFFER_SELECT);
                     int tmp_fd = conn_i.fd;
                     for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
-                        if (clients_list[i].connected && clients_list[i].fd != tmp_fd) {
-                            add_socket_write(&ring, clients_list[i].fd, bid, bytes_read, 0);
-                        }
+                         if (clients_list[i].connected && clients_list[i].fd != tmp_fd) {
+                            bufs[bid][bytes_read] = '\0';
+                            printf("...strlen of bufs[bid]: %d\n", strlen(bufs[bid]));
+                            std::string real_mess;
+                            auto message_box = split(bufs[bid], "\n");
+                            auto messes = message_box.first;
+                            auto clip_num = message_box.second;
+                            for (int g = 0; g < clip_num; g++) {
+                                messes[g] = " [Message]" + messes[g];
+                                messes[g] += '\n';
+                                real_mess += messes[g];
+                            }
+                            printf("...data of real mess: ((((%s))))\n", real_mess.data());
+                            
+                            memset(bufs[bid], 0, MAX_MESSAGE_LEN);
+                            strncpy(bufs[bid], real_mess.data(), real_mess.length());
+                            add_socket_write(&ring, clients_list[i].fd, bid, strlen(bufs[bid]), 0);
+                            // sleep(3);
+                            conn_info conn_i = {
+                                .fd = tmp_fd,
+                                .type = READ,
+                            };
+                            memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
+                         }
                     }
-                    conn_info conn_i = {
-                        .fd = tmp_fd,
-                        .type = READ,
-                    };
-                    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
                 }
             }
             else if (type == WRITE)
@@ -288,6 +306,20 @@ void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t message_s
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
     io_uring_prep_send(sqe, fd, &bufs[bid], message_size, 0);
+    io_uring_sqe_set_flags(sqe, flags);
+
+    conn_info conn_i = {
+        .fd = fd,
+        .type = WRITE,
+        .bid = bid,
+    };
+    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
+}
+
+void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t message_size, unsigned flags, const void* buf)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    io_uring_prep_send(sqe, fd, buf, message_size, 0);
     io_uring_sqe_set_flags(sqe, flags);
 
     conn_info conn_i = {
