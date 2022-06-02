@@ -14,63 +14,81 @@
 #include "liburing.h"
 #include "0.h"
 
-#define MAX_CLIENT_NUMBER 32
-#define MAX_CONNECTIONS 64
 #define BACKLOG 512
-#define MAX_MESSAGE_LEN 1025
-#define BUFFERS_COUNT MAX_CONNECTIONS
+#define BUFFERS_COUNT 64
 
-void add_accept(struct io_uring *ring, int fd, struct sockaddr *client_addr, socklen_t *client_len, unsigned flags);
-void add_socket_read(struct io_uring *ring, int fd, unsigned gid, size_t size, unsigned flags);
-void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t size, unsigned flags);
-void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t size, unsigned flags, const void* buf);
-void add_provide_buf(struct io_uring *ring, __u16 bid, unsigned gid);
-
-enum
-{
-    ACCEPT,
-    READ,
-    WRITE,
-    PROV_BUF,
-};
-
-typedef struct conn_info
-{
-    __u32 fd;
-    __u16 type;
-    __u16 bid;
-} conn_info;
-
-char bufs[BUFFERS_COUNT][MAX_MESSAGE_LEN] = {0};
-char buf[MAX_MESSAGE_LEN] = {0};
+char bufs[BUFFERS_COUNT][MAX_SINGLE_MESSAGE_LENGTH] = {0};
 int group_id = 1337;
-
-typedef struct Client_uring
-{
-    int connected;
-    int fd;
-} Client_uring;
 
 Client_uring clients_list[MAX_CLIENT_NUMBER];
 int connected_clients_num = 0;
 
-void display_client()
+void add_accept(struct io_uring *ring, int fd, struct sockaddr *client_addr, socklen_t *client_len, unsigned flags)
 {
-    // for (int i = 0; i < MAX_CLIENT_NUMBER; i++)
-    // {
-    //     printf(" sock index:%d, fd:%d, connected:%d\n", i, clients_list[i].fd, clients_list[i].connected);
-    // }
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    io_uring_prep_accept(sqe, fd, client_addr, client_len, 0);
+    io_uring_sqe_set_flags(sqe, flags);
+
+    conn_info conn_i = {
+        .fd = fd,
+        .type = ACCEPT,
+    };
+    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
 }
 
-void client_destroy(int fd) {
-    for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
-        if (clients_list[i].connected && clients_list[i].fd == fd) {
+void add_socket_read(struct io_uring *ring, int fd, unsigned gid, size_t message_size, unsigned flags)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    io_uring_prep_recv(sqe, fd, NULL, message_size, 0);
+    io_uring_sqe_set_flags(sqe, flags);
+    sqe->buf_group = gid;
+
+    conn_info conn_i = {
+        .fd = fd,
+        .type = READ,
+    };
+    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
+}
+
+void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t message_size, unsigned flags)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    io_uring_prep_send(sqe, fd, &bufs[bid], message_size, 0);
+    io_uring_sqe_set_flags(sqe, flags);
+
+    conn_info conn_i = {
+        .fd = fd,
+        .type = WRITE,
+        .bid = bid,
+    };
+    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
+}
+
+void add_provide_buf(struct io_uring *ring, __u16 bid, unsigned gid)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    io_uring_prep_provide_buffers(sqe, bufs[bid], MAX_SINGLE_MESSAGE_LENGTH, 1, gid, bid);
+
+    conn_info conn_i = {
+        .fd = 0,
+        .type = PROV_BUF,
+    };
+    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
+}
+
+void client_destroy(int fd)
+{
+    for (int i = 0; i < MAX_CLIENT_NUMBER; i++)
+    {
+        if (clients_list[i].connected && clients_list[i].fd == fd)
+        {
             clients_list[i].connected = 0;
             connected_clients_num--;
+            break;
         }
     }
+    printf("[QUIT] one client left, now %d in total\n", connected_clients_num);
 }
-
 
 int client_add(int fd)
 {
@@ -87,12 +105,11 @@ int client_add(int fd)
     {
         return -1;
     }
-    // fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     clients_list[index].connected = 1;
     clients_list[index].fd = fd;
     connected_clients_num++;
 
-    printf("fd:%d, index:%d\n", fd, index);
+    printf("[ENTER] new client added, now %d in total\n", connected_clients_num);
 
     return index;
 }
@@ -124,7 +141,7 @@ int main(int argc, char *argv[])
         perror("listen");
         return 1;
     }
-    printf("io_uring server listening for connections on port: %d\n", port);
+    // printf("io_uring server listening for connections on port: %d\n", port);
 
     // initialize io_uring
     struct io_uring_params params;
@@ -159,7 +176,7 @@ int main(int argc, char *argv[])
     struct io_uring_cqe *cqe;
 
     sqe = io_uring_get_sqe(&ring);
-    io_uring_prep_provide_buffers(sqe, bufs, MAX_MESSAGE_LEN, BUFFERS_COUNT, group_id, 0);
+    io_uring_prep_provide_buffers(sqe, bufs, MAX_SINGLE_MESSAGE_LENGTH, BUFFERS_COUNT, group_id, 0);
 
     io_uring_submit(&ring);
     io_uring_wait_cqe(&ring, &cqe);
@@ -195,7 +212,7 @@ int main(int argc, char *argv[])
             memcpy(&conn_i, &cqe->user_data, sizeof(conn_i));
 
             int type = conn_i.type;
-            
+
             // 相当于获得了events.data
             if (type == PROV_BUF)
             {
@@ -211,7 +228,7 @@ int main(int argc, char *argv[])
                 // only read when there is no error, >= 0
                 if (sock_conn_fd >= 0)
                 {
-                    add_socket_read(&ring, sock_conn_fd, group_id, MAX_MESSAGE_LEN, IOSQE_BUFFER_SELECT);
+                    add_socket_read(&ring, sock_conn_fd, group_id, MAX_SINGLE_MESSAGE_LENGTH, IOSQE_BUFFER_SELECT);
                 }
 
                 // new connected client; read data from socket and re-add accept to monitor for new connections
@@ -232,25 +249,35 @@ int main(int argc, char *argv[])
                 }
                 else
                 {
-                    add_socket_read(&ring, conn_i.fd, group_id, MAX_MESSAGE_LEN, IOSQE_BUFFER_SELECT);
+                    // printf("\n\n-----------------new debug--------------------\n");
+                    // printf("...bytes_read: %d\n", bytes_read);
+                    // printf("...bid, bufs[bid]: %d, %s", bid, bufs[bid]);
+
+                    add_socket_read(&ring, conn_i.fd, group_id, MAX_SINGLE_MESSAGE_LENGTH, IOSQE_BUFFER_SELECT);
                     int tmp_fd = conn_i.fd;
-                    for (int i = 0; i < MAX_CLIENT_NUMBER; i++) {
-                         if (clients_list[i].connected && clients_list[i].fd != tmp_fd) {
-                            bufs[bid][bytes_read] = '\0';
-                            printf("...strlen of bufs[bid]: %d\n", strlen(bufs[bid]));
-                            std::string real_mess;
-                            auto message_box = split(bufs[bid], "\n");
-                            auto messes = message_box.first;
-                            auto clip_num = message_box.second;
-                            for (int g = 0; g < clip_num; g++) {
-                                messes[g] = " [Message]" + messes[g];
-                                messes[g] += '\n';
-                                real_mess += messes[g];
-                            }
-                            printf("...data of real mess: ((((%s))))\n", real_mess.data());
-                            
-                            memset(bufs[bid], 0, MAX_MESSAGE_LEN);
-                            strncpy(bufs[bid], real_mess.data(), real_mess.length());
+
+                    // printf("...strlen of bufs[bid]: %d\n", strlen(bufs[bid]));
+                    std::string real_mess;
+                    auto message_box = split(bufs[bid], "\n", bytes_read);
+                    auto messes = message_box.first;
+                    auto clip_num = message_box.second;
+                    for (int g = 0; g < clip_num; g++)
+                    {
+                        messes[g] = " [Message]" + messes[g];
+                        messes[g] += '\n';
+                        real_mess += messes[g];
+                    }
+                    // printf("...data of real mess: ((((%s))))\n", real_mess.data());
+
+                    memset(bufs[bid], 0, MAX_SINGLE_MESSAGE_LENGTH);
+                    strncpy(bufs[bid], real_mess.data(), real_mess.length());
+
+                    for (int i = 0; i < MAX_CLIENT_NUMBER; i++)
+                    {
+                        if (clients_list[i].connected && clients_list[i].fd != tmp_fd)
+                        {
+                            // bufs[bid][bytes_read] = '\0';
+
                             add_socket_write(&ring, clients_list[i].fd, bid, strlen(bufs[bid]), 0);
                             // sleep(3);
                             conn_info conn_i = {
@@ -258,7 +285,7 @@ int main(int argc, char *argv[])
                                 .type = READ,
                             };
                             memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
-                         }
+                        }
                     }
                 }
             }
@@ -267,77 +294,9 @@ int main(int argc, char *argv[])
                 // write has been completed, first re-add the buffer
                 add_provide_buf(&ring, conn_i.bid, group_id);
                 // add a new read for the existing connection
-                //add_socket_read(&ring, conn_i.fd, group_id, MAX_MESSAGE_LEN, IOSQE_BUFFER_SELECT);
+                // add_socket_read(&ring, conn_i.fd, group_id, MAX_SINGLE_MESSAGE_LENGTH, IOSQE_BUFFER_SELECT);
             }
         }
         io_uring_cq_advance(&ring, count);
     }
-}
-
-void add_accept(struct io_uring *ring, int fd, struct sockaddr *client_addr, socklen_t *client_len, unsigned flags)
-{
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    io_uring_prep_accept(sqe, fd, client_addr, client_len, 0);
-    io_uring_sqe_set_flags(sqe, flags);
-
-    conn_info conn_i = {
-        .fd = fd,
-        .type = ACCEPT,
-    };
-    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
-}
-
-void add_socket_read(struct io_uring *ring, int fd, unsigned gid, size_t message_size, unsigned flags)
-{
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    io_uring_prep_recv(sqe, fd, NULL, message_size, 0);
-    // printf("fd%d try to recv message from %d\n", fd, fd);
-    io_uring_sqe_set_flags(sqe, flags);
-    sqe->buf_group = gid;
-
-    conn_info conn_i = {
-        .fd = fd,
-        .type = READ,
-    };
-    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
-}
-
-void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t message_size, unsigned flags)
-{
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    io_uring_prep_send(sqe, fd, &bufs[bid], message_size, 0);
-    io_uring_sqe_set_flags(sqe, flags);
-
-    conn_info conn_i = {
-        .fd = fd,
-        .type = WRITE,
-        .bid = bid,
-    };
-    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
-}
-
-void add_socket_write(struct io_uring *ring, int fd, __u16 bid, size_t message_size, unsigned flags, const void* buf)
-{
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    io_uring_prep_send(sqe, fd, buf, message_size, 0);
-    io_uring_sqe_set_flags(sqe, flags);
-
-    conn_info conn_i = {
-        .fd = fd,
-        .type = WRITE,
-        .bid = bid,
-    };
-    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
-}
-
-void add_provide_buf(struct io_uring *ring, __u16 bid, unsigned gid)
-{
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    io_uring_prep_provide_buffers(sqe, bufs[bid], MAX_MESSAGE_LEN, 1, gid, bid);
-
-    conn_info conn_i = {
-        .fd = 0,
-        .type = PROV_BUF,
-    };
-    memcpy(&sqe->user_data, &conn_i, sizeof(conn_i));
 }
