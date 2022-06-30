@@ -2,6 +2,8 @@
 
 之所以叫记录不叫报告是因为根本就没让交嘛……
 
+PB20111686 黄瑞轩
+
 ## Linux 编译
 
 在 [kernel.org](https://www.kernel.org/) 上可以下载到 Linux 内核的源代码。
@@ -15,12 +17,22 @@
 下载好 linux-5.16.17.tar.xz 文件后，解压缩为文件夹 linux-5.16.17。
 
 > 使用`tar`命令来解压缩，`xz`格式的解压参数是`Jxvf`。
+>
+> 参数中`x`表示解压，`J`表示解压xz格式的数据，`f`表示指定输入文件
 
 进入后创建默认配置：
 
 ```
 make defconfig
 ```
+
+> 这一步报错：
+>
+> ![image-20220329221121237](report.assets/image-20220329221121237.png)
+>
+> 解决方案：`sudo apt-get install flex`和`sudo apt-get install bison -y`
+>
+> 这两个是干什么用的？
 
 然后使用下列命令之一（推荐前两者），对 Linux 内核进行修改：
 
@@ -30,6 +42,12 @@ make menuconfig
 make gconfig
 make nconfig
 ```
+
+> 执行第一个命令遇到错误，因为第一个是图形化的，执行第二个可以。
+>
+> ![image-20220329221448609](report.assets/image-20220329221448609.png)
+>
+> https://www.cnblogs.com/klb561/p/9192630.html【各文件夹用途】
 
 初次编译可以不进行修改，体验编译的过程。
 
@@ -46,6 +64,77 @@ make -j <cores>
 ```
 
 `<cores>` 可以自行调节，不大于上述 CPU 虚拟核心数较佳。
+
+> 普通班讲义提示：使用``make -j $((`nproc`-1))``
+>
+> `nproc`是个shell内置变量，代表CPU核心数。
+>
+> 如果指令只有`make -j`，后面没有加上处理器核数，那么编译器会无限开多线程。因为 Linux 内核编译十分复杂，这会直接吃满系统资源，导致系统崩溃。
+
+> 编译出来的内核镜像文件存放在源码路径的`arch/x86_64/boot`下，首次编译时间贼几把长而且最后大小有10.3MiB，根据下面调参比赛的要求（bushi），需要尽可能地减小此镜像大小。
+>
+> 哪些选项是能够真正地、切实地影响编译后的内核大小的？这是要思考的问题。
+>
+> 我也不知道 反正就一通乱选 最后变成2.6Mb了 但是有Kernel panic出现。
+
+> **2018 OSH 提示：**
+>
+> 打开64位内核支持：
+>
+> ```
+> [*] 64-bit kernel
+> ```
+>
+> 为了让内核能够打印调试信息，我们需要打开kernel print function的支持：
+>
+> ```
+> -> General setup
+>   -> Configure standard kernel features
+> [*] Enable support for printk
+> ```
+>
+> 打开内存文件系统的支持：
+>
+> ```
+> -> General setup
+> [*] Initial RAM filesystem and RAM disk (initramfs/initrd) support
+> ```
+>
+> 打开ELF可执行文件的支持：
+>
+> ```
+> -> Executable file formats / Emulations
+> [*] Kernel support for ELF binaries
+> ```
+>
+> 打开TTY驱动的支持：
+>
+> ```
+> -> Device Drivers
+>   -> Character devices
+> [*] Enable TTY
+> ```
+>
+> 为了能让QEMU能正常显示终端，需要打开UART串口的支持：
+>
+> ```
+> -> Device Drivers
+>   -> Character devices
+>     -> Serial drivers
+> [*] 8250/16550 and compatible serial support
+> [*]   Console on 8250/16550 and compatible serial port
+> ```
+>
+> 为了让标准UNIX工具能够正常工作（如获取启动时间），需要打开`/proc`和`sysfs`文件系统的支持：
+>
+> ```
+> -> File systems
+>   -> Pseudo filesystems
+> [*] /proc file system support
+> [*] sysfs file system support
+> ```
+>
+> 全部设置完成后，请保存修改后退出配置编辑器。
 
 编译完成后可以使用 QEMU 进行测试：
 
